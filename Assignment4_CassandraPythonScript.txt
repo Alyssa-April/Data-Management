@@ -1,0 +1,87 @@
+# (Number 1) Python libraries used to execute Spark2 and Cassandra sessions
+
+from pyspark.sql import SparkSession # The entry point to programming Spark with the Dataset and DataFrame API.
+from pyspark.sql import Row # Import the ROW method, which takes up the argument for creating Row Object.
+from pyspark.sql import functions # A collections of builtin functions
+
+# (Number 2) Functions to parse the u.user file into HDFS
+
+# Define the parseInput function
+def parseInput(line):
+# By using the defined parseInput function, a line of input data is split using the pipe (|) delimiter. 
+	fields = line.split('|')
+# Create a Row object based on the parsed data of user id, age, gender, occupation and zip code from the u.user file later on. 
+# The columns are named user_id, age, gender, occupation and zip respectively. 
+# The fields are converted to the appropriate data types and returned as a tuple.
+	return Row(user_id = int(fields[0]), age = int(fields[1]), gender = fields[2], occupation = fields[3], zip = fields[4])
+
+# Codes inside this if statement are only executed when the program is run directly by the Python interpreter. 
+# It is a mechanism to regulate how a script runs based on whether it is imported as a module or ran directly.
+if __name__ == "__main__":
+
+# Create a SparkSession using the supplied name "CassandraAssignment4".
+# This allows us to communicate with Spark and execute various actions on the 
+# data using the Spark APIs.
+# The configuration for connecting to Cassandra is set. The Cassandra host is set as 127.0.0.1, the local host. 
+# getOrCreate() will retrieve an existing SparkSession or create a new one
+# if it does not exist.
+	spark = SparkSession.builder.appName("CassandraIntegration").config("spark.cassandra.connection.host", "127.0.0.1").getOrCreate()
+
+# (Number 3) Functions to load, read and create Resilient Distributed Dataset (RDD) objects   
+     
+# Get the raw data: The u.user file is loaded into an RDD called lines using the textFile().
+	lines = spark.sparkContext.textFile("hdfs:///user/maria_dev/ml-100k/u.user")
+# Convert the data into a RDD of Row objects with (user id, age, gender, occupation and zip code).
+# The map function is applied to convert each line of the RDD into the needed format using 
+# the previously defined parseInput function.
+	users = lines.map(parseInput)
+
+# (Number 4) Functions to convert the RDD objects into DataFrame  
+  
+# The data frame is called usersDataset
+	usersDataset = spark.createDataFrame(users)
+
+# (Number 5) Functions to write the DataFrame into the Keyspace database created in Cassandra
+
+# By utilising the write function, usersDataset is written into a Cassandra table named "users" in the keyspace "movielens"
+# that has already been created.
+# Begin the writing process on usersDataset.
+# Identifies Cassandra as the target data source for writing.
+# Specifies the writing mode.
+# Identify the Cassandra table and keyspace used to write the data to.
+	usersDataset.write\
+		.format("org.apache.spark.sql.cassandra")\
+		.mode('append')\ 
+		.options(table = "users", keyspace = "movielens")\
+		.save() # saves the data from the data frame into the chosen Cassandra table and keyspace, starting the actual write operation
+
+# (Number 6) Functions to read the table back from Cassandra into a new DataFrame
+
+# By utilising the read function, the Cassandra table "users" can be read from the keyspace "movielens" 
+# into a new data frame called readUsers.
+# Begins the reading process.
+# Establishes Cassandra as the data source to be read from.
+# Identify the source Cassandra table and keyspace that the data will be read from.
+	readUsers = spark.read\
+	.format("org.apache.spark.sql.cassandra")\
+	.options(table = "users", keyspace = "movielens")\
+	.load() # start the actual read operation and load the data into readUsers from the Cassandra table and keyspace that have been defined
+
+# Based on users_read_df, createOrReplaceTempView() creates or replaces a temporary view called "users". 
+# To run SQL queries on the dataframe, a temporary view is a logical table that can be utilised temporarily. 
+# SQL operations can be done on the data frame and treat it just like a table.
+	readUsers.createOrReplaceTempView("users")
+
+# SQL statement that selects all columns from the "users" table.
+# The condition age < 20 is used in the WHERE clause to filter only rows with users aged below 20.
+	users_less_20 = spark.sql("SELECT * FROM users WHERE age < 20")
+# The WHERE clause filters rows for the conditions set, namely the user is a scientist and aged between 30 and 40 years old.
+	users_scientist_3040 = spark.sql("SELECT * FROM users WHERE occupation = 'scientist' AND age > 30 AND age < 40")
+	
+	print("Top 10 Users Aged Less Than 20 Years Old") # print an indication for the following results
+	users_less_20.show(n = 10) # display the top 10 results of users_less_20
+	print("Top 10 Users Who Are Scientists Aged Between 30 and 40 Years Old") # print an indication for the following results
+	users_scientist_3040.show(n = 10) # display the top 10 results of users_scientist_3040
+
+# Stop the underlying SparkContext and release the resources associated with it.
+	spark.stop()
